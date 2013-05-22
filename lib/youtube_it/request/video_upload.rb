@@ -179,12 +179,54 @@ class YouTubeIt
         return YouTubeIt::Parser::VideoFeedParser.new(response.body).parse rescue nil
       end
 
+      def default_fields
+        "id,updated,openSearch:totalResults,openSearch:startIndex,openSearch:itemsPerPage"
+      end
+
+      def fields_to_params(fields)
+        return "" unless fields
+
+        fields_param = [default_fields]
+
+        if fields[:recorded]
+          if fields[:recorded].is_a? Range
+            fields_param << "entry[xs:date(yt:recorded) > xs:date('#{formatted_date(fields[:recorded].first)}') and xs:date(yt:recorded) < xs:date('#{formatted_date(fields[:recorded].last)}')]"
+          else
+            fields_param << "entry[xs:date(yt:recorded) = xs:date('#{formatted_date(fields[:recorded])}')]"
+          end
+        end
+
+        if fields[:published]
+          if fields[:published].is_a? Range
+            fields_param << "entry[xs:dateTime(published) > xs:dateTime('#{fields[:published].first}') and xs:dateTime(published) < xs:dateTime('#{fields[:published].last}')]"
+          else
+            fields_param << "entry[xs:date(published) = xs:date('#{formatted_date(fields[:published])}')]"
+          end
+        end
+
+        if fields[:view_count]
+          fields_param << "entry[yt:statistics/@viewCount > #{fields[:view_count]}]"
+        end
+
+        if fields[:entry]
+          fields_param << "entry[#{fields[:entry]}]"
+        end
+
+
+        return "&fields=#{URI.escape(fields_param.join(","))}"
+      end
+
       # Fetches the data of the videos of the current user, which may be private.
       # When the authentication credentials are incorrect, an AuthenticationError will be raised.
       def get_my_videos(opts)
         max_results = opts[:per_page] || 50
         start_index = ((opts[:page] || 1) -1) * max_results +1
-        get_url     = "/feeds/api/users/default/uploads?max-results=#{max_results}&start-index=#{start_index}"
+
+        field_params = fields_to_params(opts[:fields])
+
+        get_url     = "/feeds/api/users/default/uploads?max-results=#{max_results}&start-index=#{start_index}" + field_params
+        puts get_url
+
         response    = yt_session.get(get_url)
 
         return YouTubeIt::Parser::VideosFeedParser.new(response.body).parse
@@ -265,7 +307,7 @@ class YouTubeIt
       def videos(idxes_to_fetch)
         idxes_to_fetch.each_slice(50).map do |idxes|
           post = Nokogiri::XML <<-BATCH
-              <feed 
+              <feed
                 xmlns='http://www.w3.org/2005/Atom'
                 xmlns:media='http://search.yahoo.com/mrss/'
                 xmlns:batch='http://schemas.google.com/gdata/batch'
@@ -290,7 +332,7 @@ class YouTubeIt
           YouTubeIt::Parser::BatchVideoFeedParser.new(response).parse
         end.reduce({},:merge)
       end
-      
+
       def profiles(usernames_to_fetch)
         usernames_to_fetch.each_slice(50).map do |usernames|
           post = Nokogiri::XML <<-BATCH
